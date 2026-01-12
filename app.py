@@ -6,10 +6,9 @@ import numpy as np
 # Configuração da Página
 st.set_page_config(page_title="Simulador de Arquitetura Bancária AWS", layout="wide")
 
-st.title("Simulador de Trade-offs: Aurora vs. DynamoDB (sa-east-1)")
+st.title("Simulador AWS & DBs (sa-east-1)")
 st.markdown("""
 Esta ferramenta simula custos e viabilidade técnica baseada nos relatórios de engenharia da pasta `docs`.
-Foco: **Consistência Forte**, **Alta Vazão (TPS)** e **Custo Brasil**.
 """)
 
 # --- SIDEBAR: PARÂMETROS DE ENTRADA ---
