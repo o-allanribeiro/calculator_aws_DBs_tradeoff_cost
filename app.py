@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 # Configuração da Página
-st.set_page_config(page_title="Simulador de Arquitetura Bancária AWS", layout="wide")
+st.set_page_config(page_title="Simulador de Arquitetura AWS", layout="wide")
 
 st.title("Simulador AWS & DBs (sa-east-1)")
 st.markdown("""
