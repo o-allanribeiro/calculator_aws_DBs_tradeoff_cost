@@ -31,49 +31,70 @@ use_sharding = st.sidebar.checkbox("Aplicar Write Sharding (Lógica de App)", va
 DAYS_MONTH = 30.5
 SECONDS_MONTH = DAYS_MONTH * 24 * 60 * 60
 
-# Cálculo de Requisições Mensais
-total_requests_mo = tps_avg * SECONDS_MONTH
-write_requests_mo = total_requests_mo * (write_ratio / 100)
-read_requests_mo = total_requests_mo * ((100 - write_ratio) / 100)
-
 # 1. CUSTO AURORA POSTGRESQL (db.r7g.2xlarge - Graviton como referência)
 # Referência: Docs mencionam r7g para economia
 aurora_instance_hourly = 1.20  # Estimativa r7g.2xlarge sa-east-1
 aurora_storage_gb_mo = 0.12
 aurora_io_rate_million = 0.22  # Custo por milhão de I/Os (Standard)
 
-# Aurora Standard
-cost_aurora_std_compute = aurora_instance_hourly * 24 * DAYS_MONTH
-cost_aurora_std_storage = storage_gb * aurora_storage_gb_mo
-# Estimativa: 1 transação = 2 I/Os (1 índice + 1 tabela) no mínimo
-aurora_ios_mo = (write_requests_mo * 2) + (read_requests_mo * 1) 
-cost_aurora_std_io = (aurora_ios_mo / 1_000_000) * aurora_io_rate_million
-total_aurora_std = cost_aurora_std_compute + cost_aurora_std_storage + cost_aurora_std_io
-
-# Aurora I/O Optimized (Custo Storage maior, IO zero, Instância +30%)
-cost_aurora_opt_compute = cost_aurora_std_compute * 1.35
-cost_aurora_opt_storage = storage_gb * 0.25 # Storage é mais caro no I/O Optimized
-total_aurora_opt = cost_aurora_opt_compute + cost_aurora_opt_storage
-
 # 2. CUSTO DYNAMODB (On-Demand para simplificar simulação de picos)
 ddb_write_million = 1.50 # Preço escrita sa-east-1
 ddb_read_million = 0.30  # Preço leitura sa-east-1
 ddb_storage_gb_mo = 0.28
 
-# Ajuste por tamanho do item (blocos de 1KB no DDB vs 4KB standard)
-wcu_multiplier = item_size_kb # 1 WCU por KB
-rcu_multiplier = item_size_kb # 1 RCU por 4KB (simplificado para 1 por KB para consistencia forte)
 
-if use_strong_consistency:
-    # Strong consistency consome o dobro ou 1 RCU inteira
-    rcu_multiplier = item_size_kb 
-else:
-    rcu_multiplier = item_size_kb / 2
+def calculate_costs(tps, write_ratio, storage_gb, item_size_kb, use_strong_consistency):
+    """Calcula o custo mensal estimado (USD) para um TPS médio sustentado."""
+    total_requests_mo = tps * SECONDS_MONTH
+    write_requests_mo = total_requests_mo * (write_ratio / 100)
+    read_requests_mo = total_requests_mo * ((100 - write_ratio) / 100)
 
-cost_ddb_write = (write_requests_mo * wcu_multiplier / 1_000_000) * ddb_write_million
-cost_ddb_read = (read_requests_mo * rcu_multiplier / 1_000_000) * ddb_read_million
-cost_ddb_storage = storage_gb * ddb_storage_gb_mo
-total_ddb = cost_ddb_write + cost_ddb_read + cost_ddb_storage
+    # Aurora Standard
+    cost_aurora_std_compute = aurora_instance_hourly * 24 * DAYS_MONTH
+    cost_aurora_std_storage = storage_gb * aurora_storage_gb_mo
+    # Estimativa: 1 transação = 2 I/Os (1 índice + 1 tabela) no mínimo
+    aurora_ios_mo = (write_requests_mo * 2) + (read_requests_mo * 1)
+    cost_aurora_std_io = (aurora_ios_mo / 1_000_000) * aurora_io_rate_million
+    total_aurora_std = cost_aurora_std_compute + cost_aurora_std_storage + cost_aurora_std_io
+
+    # Aurora I/O Optimized (Custo Storage maior, IO zero, Instância +30%)
+    cost_aurora_opt_compute = cost_aurora_std_compute * 1.35
+    cost_aurora_opt_storage = storage_gb * 0.25  # Storage é mais caro no I/O Optimized
+    total_aurora_opt = cost_aurora_opt_compute + cost_aurora_opt_storage
+
+    # Ajuste por tamanho do item (blocos de 1KB no DDB vs 4KB standard)
+    wcu_multiplier = item_size_kb  # 1 WCU por KB
+    if use_strong_consistency:
+        # Strong consistency consome o dobro ou 1 RCU inteira
+        rcu_multiplier = item_size_kb
+    else:
+        rcu_multiplier = item_size_kb / 2
+
+    cost_ddb_write = (write_requests_mo * wcu_multiplier / 1_000_000) * ddb_write_million
+    cost_ddb_read = (read_requests_mo * rcu_multiplier / 1_000_000) * ddb_read_million
+    cost_ddb_storage = storage_gb * ddb_storage_gb_mo
+    total_ddb = cost_ddb_write + cost_ddb_read + cost_ddb_storage
+
+    return {
+        "aurora_std": total_aurora_std,
+        "aurora_opt": total_aurora_opt,
+        "ddb": total_ddb,
+        "aurora_std_io": cost_aurora_std_io,
+        "aurora_opt_storage": cost_aurora_opt_storage,
+        "ddb_write": cost_ddb_write,
+    }
+
+
+# Custo para a carga configurada (TPS médio atual)
+costs_now = calculate_costs(tps_avg, write_ratio, storage_gb, item_size_kb, use_strong_consistency)
+total_aurora_std = costs_now["aurora_std"]
+total_aurora_opt = costs_now["aurora_opt"]
+total_ddb = costs_now["ddb"]
+cost_aurora_std_io = costs_now["aurora_std_io"]
+cost_aurora_opt_storage = costs_now["aurora_opt_storage"]
+cost_ddb_write = costs_now["ddb_write"]
+
+total_requests_mo = tps_avg * SECONDS_MONTH
 
 # --- DASHBOARD ---
 
@@ -103,6 +124,56 @@ cost_data = pd.DataFrame({
 })
 st.table(cost_data.style.format({'Custo Total ($)': '${:,.2f}'}))
 
+# --- SIMULAÇÃO: CUSTO x TPS ---
+st.markdown("---")
+st.subheader("Simulação: Como o Custo Escala com o TPS")
+st.markdown("""
+A tabela acima mostra um retrato estático para a carga configurada. O gráfico abaixo **simula** o custo mensal de cada arquitetura variando o TPS médio sustentado, mantendo os demais parâmetros (proporção de escrita, storage, tamanho do item) fixos — é isso que revela o comportamento de cada banco sob crescimento de carga, não só o custo de hoje.
+""")
+
+tps_sim_max = max(tps_peak * 1.2, tps_avg * 3, 100)
+tps_range = np.linspace(max(tps_avg * 0.1, 10), tps_sim_max, 60)
+
+sim_aurora_std, sim_aurora_opt, sim_ddb = [], [], []
+for t in tps_range:
+    c = calculate_costs(t, write_ratio, storage_gb, item_size_kb, use_strong_consistency)
+    sim_aurora_std.append(c["aurora_std"])
+    sim_aurora_opt.append(c["aurora_opt"])
+    sim_ddb.append(c["ddb"])
+
+y_max = max(max(sim_aurora_std), max(sim_aurora_opt), max(sim_ddb))
+
+fig, ax = plt.subplots(figsize=(10, 5))
+ax.plot(tps_range, sim_aurora_std, label="Aurora Standard", color="#2563eb", linewidth=2)
+ax.plot(tps_range, sim_aurora_opt, label="Aurora I/O Optimized", color="#7c3aed", linewidth=2)
+ax.plot(tps_range, sim_ddb, label="DynamoDB On-Demand", color="#f97316", linewidth=2)
+
+ax.set_ylim(0, y_max * 1.15)
+
+# Marcador: TPS médio configurado na sidebar
+ax.axvline(tps_avg, color="gray", linestyle="--", linewidth=1, alpha=0.8)
+ax.text(tps_avg, y_max * 1.08, " TPS médio atual", rotation=90, va="top", fontsize=8, color="gray")
+
+# Zona de risco: limiar de Hot Row Lock no Aurora (~1000 TPS de escrita)
+if write_ratio > 0:
+    aurora_risk_tps = 1000 / (write_ratio / 100)
+    if aurora_risk_tps <= tps_range[-1]:
+        ax.axvspan(aurora_risk_tps, tps_range[-1], color="red", alpha=0.05)
+        ax.axvline(aurora_risk_tps, color="#dc2626", linestyle=":", linewidth=1)
+        ax.text(aurora_risk_tps, y_max * 1.08, " Risco: Hot Row Lock (Aurora)", rotation=90, va="top", fontsize=8, color="#dc2626")
+
+ax.set_xlabel("TPS Médio Sustentado")
+ax.set_ylabel("Custo Mensal Estimado (USD)")
+ax.legend(loc="upper left")
+ax.grid(True, alpha=0.3)
+fig.tight_layout()
+st.pyplot(fig)
+
+st.caption(
+    "A linha do Aurora I/O Optimized é praticamente plana porque seu modelo de preço já embute o custo de I/O na "
+    "tarifa de armazenamento/computação — ela não penaliza volume de requisições, ao contrário do Standard e do "
+    "DynamoDB, cujo custo cresce linearmente com o TPS."
+)
 
 # --- ANÁLISE ARQUITETURAL AVANÇADA ---
 st.markdown("---")
