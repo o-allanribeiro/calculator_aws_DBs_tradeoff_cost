@@ -85,6 +85,23 @@ def calculate_costs(tps, write_ratio, storage_gb, item_size_kb, use_strong_consi
     }
 
 
+def render_viability_gauge(current_tps, zones, max_tps, label="TPS de Escrita (Pico)"):
+    """Barra horizontal colorida por zona de risco, com marcador no TPS atual."""
+    fig, ax = plt.subplots(figsize=(8, 0.9))
+    for start, end, color in zones:
+        ax.axvspan(max(start, 0), min(end, max_tps), color=color, alpha=0.35, linewidth=0)
+    marker_tps = min(current_tps, max_tps)
+    ax.axvline(marker_tps, color="#111827", linewidth=2)
+    ax.plot(marker_tps, 0.5, marker="v", color="#111827", markersize=10, clip_on=False)
+    ax.set_xlim(0, max_tps)
+    ax.set_ylim(0, 1)
+    ax.set_yticks([])
+    ax.set_xlabel(label, fontsize=9)
+    ax.tick_params(axis="x", labelsize=8)
+    fig.tight_layout()
+    return fig
+
+
 # Custo para a carga configurada (TPS médio atual)
 costs_now = calculate_costs(tps_avg, write_ratio, storage_gb, item_size_kb, use_strong_consistency)
 total_aurora_std = costs_now["aurora_std"]
@@ -168,6 +185,7 @@ ax.legend(loc="upper left")
 ax.grid(True, alpha=0.3)
 fig.tight_layout()
 st.pyplot(fig)
+plt.close(fig)
 
 st.caption(
     "A linha do Aurora I/O Optimized é praticamente plana porque seu modelo de preço já embute o custo de I/O na "
@@ -181,10 +199,14 @@ st.subheader("Análise Arquitetural Estratégica")
 st.markdown("Esta seção compara os bancos de dados sob a ótica de sistemas distribuídos, focando em seus trade-offs fundamentais.")
 
 peak_write_tps = tps_peak * (write_ratio/100)
+gauge_max_tps = max(peak_write_tps * 1.3, 1500)
 
 # --- Aurora Expander ---
 with st.expander("Amazon Aurora (PostgreSQL)"):
     st.markdown("##### Análise Dinâmica para sua Carga")
+    aurora_zones = [(0, 300, "#16a34a"), (300, 1000, "#eab308"), (1000, gauge_max_tps, "#dc2626")]
+    st.pyplot(render_viability_gauge(peak_write_tps, aurora_zones, gauge_max_tps))
+    plt.close("all")
     if peak_write_tps > 1000:
         st.error(f"**Gargalo Crítico:** Com o pico de **{peak_write_tps:.0f} TPS** de escrita, o Aurora sofrerá com 'Row Lock Contention' (disputa de bloqueio na mesma linha), resultando em performance degradada e timeouts.")
     elif peak_write_tps > 300:
@@ -226,6 +248,12 @@ with st.expander("Amazon Aurora (PostgreSQL)"):
 # --- DynamoDB Expander ---
 with st.expander("Amazon DynamoDB"):
     st.markdown("##### Análise Dinâmica para sua Carga")
+    if use_sharding:
+        ddb_zones = [(0, gauge_max_tps, "#16a34a")]
+    else:
+        ddb_zones = [(0, 1000, "#16a34a"), (1000, gauge_max_tps, "#dc2626")]
+    st.pyplot(render_viability_gauge(peak_write_tps, ddb_zones, gauge_max_tps))
+    plt.close("all")
     if peak_write_tps > 1000 and not use_sharding:
         st.error(f"**Gargalo Crítico:** Com **{peak_write_tps:.0f} TPS** de escrita e sem 'Write Sharding', sua aplicação sofrerá 'Throttling' severo devido ao limite de 1000 WCU por partição.")
     elif use_sharding:
@@ -268,6 +296,8 @@ with st.expander("Amazon DynamoDB"):
 # --- CockroachDB Expander ---
 with st.expander("CockroachDB"):
     st.markdown("##### Análise Dinâmica para sua Carga")
+    st.pyplot(render_viability_gauge(peak_write_tps, [(0, gauge_max_tps, "#16a34a")], gauge_max_tps))
+    plt.close("all")
     st.success(f"**Nativamente Escalável:** CockroachDB é projetado para escalar escritas horizontalmente. Ele distribui os dados em 'ranges' pelo cluster, evitando o problema de 'Hot Row' que afeta o Aurora em picos de **{peak_write_tps:.0f} TPS**.")
     
     st.markdown("---")
@@ -304,6 +334,8 @@ with st.expander("CockroachDB"):
 # --- Cassandra/ScyllaDB Expander ---
 with st.expander("Apache Cassandra / ScyllaDB"):
     st.markdown("##### Análise Dinâmica para sua Carga")
+    st.pyplot(render_viability_gauge(peak_write_tps, [(0, gauge_max_tps, "#16a34a")], gauge_max_tps))
+    plt.close("all")
     st.success(f"**Performance Extrema de Escrita:** Com uma arquitetura otimizada para escritas, estes bancos de dados são projetados para absorver cargas de **{peak_write_tps:.0f} TPS** ou mais, desde que a chave de partição seja bem distribuída.")
 
     st.markdown("---")
