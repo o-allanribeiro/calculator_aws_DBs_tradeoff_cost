@@ -129,6 +129,10 @@ st.markdown("---")
 st.markdown("---")
 st.subheader("Estimativa de Custo Mensal (USD)")
 st.markdown("A análise de custo é focada nos serviços AWS, onde a precificação é mais facilmente modelada.")
+st.caption(
+    "Valores **aproximados, para fins de estudo** (região sa-east-1, referência de preços de jan/2026). "
+    "Não substituem a calculadora oficial da AWS: confirme os preços vigentes antes de qualquer decisão."
+)
 
 cost_data = pd.DataFrame({
     'Serviço': ['Aurora Standard', 'Aurora I/O Optimized', 'DynamoDB (On-Demand)'],
