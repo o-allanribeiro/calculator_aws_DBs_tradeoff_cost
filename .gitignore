@@ -4,3 +4,21 @@ __pycache__/
 *.pyc
 .pytest_cache/
 .streamlit/secrets.toml
+
+# Segredos e credenciais
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+credentials.json
+secrets.json
+service-account*.json
+*.tfvars
+
+# Jupyter e sistema
+.ipynb_checkpoints/
+.DS_Store
+Thumbs.db
